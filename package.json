@@ -1,0 +1,12 @@
+{
+  "name": "fleet-management",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fleet management - Maintenance Management component",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
