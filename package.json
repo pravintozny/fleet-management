@@ -1,0 +1,11 @@
+{
+  "name": "fleet-management",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fleet management: Vehicle Management and Driver Management components",
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "test": "node --test --experimental-strip-types \"test/**/*.test.ts\""
+  }
+}
