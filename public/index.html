@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet Management – Analytics</title>
+<style>
+  :root { --fg:#1b1f24; --muted:#5b6470; --line:#ddd; --card:#fff; --bg:#f6f7f9;
+          --active:#1a7f4b; --idle:#2b6cb0; --maintenance:#b7791f; --out_of_service:#b00020; --accent:#2b6cb0; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg:#e8eaed; --muted:#9aa3ae; --line:#3a4048; --card:#1f2329; --bg:#14171a;
+            --active:#48bb78; --idle:#63b3ed; --maintenance:#ecc94b; --out_of_service:#fc8181; --accent:#63b3ed; }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--fg); }
+  main { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { margin-top: 0; } h2 { font-size: 1.05rem; margin: 0 0 .75rem; }
+  .note { color: var(--muted); font-size: .85rem; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .75rem; margin: 1rem 0; padding: 0; list-style: none; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; }
+  .kpi .label { color: var(--muted); font-size: .8rem; }
+  .kpi .value { font-size: 1.7rem; font-weight: 600; }
+  .kpi .delta { font-size: .8rem; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .75rem; margin-bottom: .75rem; }
+  .bar { display: flex; height: 18px; border-radius: 4px; overflow: hidden; background: var(--line); }
+  .bar span { display: block; }
+  ul.legend { list-style: none; padding: 0; margin: .75rem 0 0; display: grid; gap: .35rem; font-size: .9rem; }
+  .dot { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; margin-right: .4rem; }
+  .row { display: grid; grid-template-columns: 6.5rem 1fr 3rem; gap: .5rem; align-items: center; font-size: .9rem; margin: .4rem 0; }
+  .meter { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--accent); }
+  svg { width: 100%; height: auto; } svg text { fill: var(--muted); font-size: 11px; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .error { color: var(--out_of_service); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fleet Analytics</h1>
+  <p class="note" id="meta" role="status" aria-live="polite">Loading…</p>
+  <ul class="kpis" id="kpis" aria-label="Key performance indicators"></ul>
+  <div class="grid">
+    <section class="card" aria-labelledby="h-status">
+      <h2 id="h-status">Vehicle status</h2>
+      <div class="bar" id="statusBar" role="img" aria-label="Vehicle status distribution"></div>
+      <ul class="legend" id="statusLegend"></ul>
+    </section>
+    <section class="card" aria-labelledby="h-type">
+      <h2 id="h-type">Utilization by vehicle type</h2>
+      <div id="typeRows"></div>
+    </section>
+  </div>
+  <section class="card" aria-labelledby="h-trend" style="margin-bottom:.75rem">
+    <h2 id="h-trend">Distance trend (km per month)</h2>
+    <div id="trend"></div>
+    <table class="sr-only" id="trendTable"><caption>Monthly distance, utilization and cost per km</caption>
+      <thead><tr><th>Month</th><th>Distance km</th><th>Utilization %</th><th>Cost/km</th></tr></thead><tbody></tbody></table>
+  </section>
+  <section class="card" aria-labelledby="h-top">
+    <h2 id="h-top">Top utilized vehicles</h2>
+    <table><thead><tr><th>Vehicle</th><th>Utilization</th></tr></thead><tbody id="top"></tbody></table>
+  </section>
+</main>
+<script>
+const STATUS_LABELS = { active: 'Active', idle: 'Idle', maintenance: 'In maintenance', out_of_service: 'Out of service' };
+const $ = (s) => document.querySelector(s);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+const fmt = (n) => Number(n).toLocaleString();
+const delta = (p) => p == null ? '' : `${p > 0 ? '▲' : p < 0 ? '▼' : '■'} ${Math.abs(p)}% vs last month`;
+
+function render(d) {
+  $('#meta').textContent = (d.sample ? 'Sample data · ' : '') + 'Updated ' + new Date(d.generatedAt).toLocaleString();
+  const k = d.kpis;
+  const kpis = [
+    ['Total vehicles', k.totalVehicles, ''],
+    ['Availability', k.availabilityRate + '%', 'Active + idle'],
+    ['Avg utilization', k.avgUtilization + '%', 'Vehicles in service'],
+    ['Distance (month)', fmt(k.distanceKm) + ' km', delta(k.distanceChangePct)],
+    ['Cost per km', k.costPerKm == null ? '—' : '$' + k.costPerKm.toFixed(2), delta(k.costPerKmChangePct)],
+  ];
+  $('#kpis').replaceChildren(...kpis.map(([l, v, s]) =>
+    el('li', { className: 'card kpi' }, el('div', { className: 'label' }, l), el('div', { className: 'value' }, String(v)), el('div', { className: 'delta' }, s))));
+
+  const total = d.kpis.totalVehicles || 1;
+  const entries = Object.entries(d.statusCounts);
+  $('#statusBar').replaceChildren(...entries.filter(([, n]) => n).map(([s, n]) =>
+    el('span', { style: `width:${(n / total) * 100}%;background:var(--${s})`, title: `${STATUS_LABELS[s]}: ${n}` })));
+  $('#statusBar').setAttribute('aria-label', 'Vehicle status: ' + entries.map(([s, n]) => `${STATUS_LABELS[s]} ${n}`).join(', '));
+  $('#statusLegend').replaceChildren(...entries.map(([s, n]) =>
+    el('li', {}, el('span', { className: 'dot', style: `background:var(--${s})` }), `${STATUS_LABELS[s]}: ${n}`)));
+
+  $('#typeRows').replaceChildren(...d.utilizationByType.map((t) =>
+    el('div', { className: 'row' }, el('span', {}, `${t.type} (${t.count})`),
+      el('div', { className: 'meter', role: 'meter', 'aria-label': t.type + ' utilization', 'aria-valuenow': t.avgUtilization, 'aria-valuemin': 0, 'aria-valuemax': 100 },
+        el('i', { style: `width:${t.avgUtilization}%` })),
+      el('span', {}, t.avgUtilization + '%'))));
+
+  const max = Math.max(...d.trend.map((m) => m.distanceKm), 1), W = 600, H = 180, pad = 24;
+  const step = (W - pad * 2) / Math.max(d.trend.length - 1, 1);
+  const pts = d.trend.map((m, i) => [pad + i * step, H - pad - (m.distanceKm / max) * (H - pad * 2)]);
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', `Line chart of monthly distance, ${d.trend[0].month} to ${d.trend.at(-1).month}`);
+  svg.innerHTML = `<polyline fill="none" stroke="var(--accent)" stroke-width="2.5" points="${pts.map((p) => p.join(',')).join(' ')}"/>` +
+    pts.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="var(--accent)"><title>${d.trend[i].month}: ${fmt(d.trend[i].distanceKm)} km</title></circle>` +
+      `<text x="${p[0]}" y="${H - 6}" text-anchor="middle">${d.trend[i].month.slice(5)}</text>`).join('');
+  $('#trend').replaceChildren(svg);
+  $('#trendTable tbody').replaceChildren(...d.trend.map((m) => el('tr', {}, ...[m.month, fmt(m.distanceKm), m.utilization, m.costPerKm].map((v) => el('td', {}, String(v))))));
+
+  $('#top').replaceChildren(...d.topVehicles.map((v) => el('tr', {}, el('td', {}, v.name), el('td', {}, v.utilization + '%'))));
+}
+
+fetch('/api/analytics').then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }).then(render)
+  .catch(() => { const m = $('#meta'); m.textContent = 'Could not load analytics.'; m.className = 'error'; });
+</script>
+</body>
+</html>
