@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleet Management – Fuel</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 960px; padding: 0 1rem; color: #1b1f24; }
+  form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .75rem; margin-bottom: 1rem; }
+  label { display: flex; flex-direction: column; font-size: .85rem; gap: .25rem; }
+  input, select, button { padding: .45rem; font: inherit; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+  th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #ddd; }
+  .error { color: #b00020; font-size: .8rem; min-height: 1em; }
+</style>
+</head>
+<body>
+<h1>Fuel Management</h1>
+<form id="form" novalidate>
+  <label>Vehicle ID <input name="vehicleId" required><span class="error" data-for="vehicleId"></span></label>
+  <label>Date <input name="date" type="date" required><span class="error" data-for="date"></span></label>
+  <label>Fuel type <select name="fuelType"></select><span class="error" data-for="fuelType"></span></label>
+  <label>Quantity <input name="quantity" type="number" step="0.01" min="0"><span class="error" data-for="quantity"></span></label>
+  <label>Unit price <input name="unitPrice" type="number" step="0.001" min="0"><span class="error" data-for="unitPrice"></span></label>
+  <label>Odometer <input name="odometer" type="number" min="0"><span class="error" data-for="odometer"></span></label>
+  <label>Station <input name="station"></label>
+  <label><span>Full tank</span><input name="fullTank" type="checkbox" checked></label>
+  <button type="submit">Add fill-up</button>
+</form>
+<label>Filter by vehicle <input id="filter" placeholder="all vehicles"></label>
+<h2>Summary</h2>
+<table id="summary"><thead><tr><th>Vehicle</th><th>Fill-ups</th><th>Quantity</th><th>Cost</th><th>Avg price</th><th>L/100km</th><th>Cost/km</th></tr></thead><tbody></tbody></table>
+<h2>Fuel log</h2>
+<table id="log"><thead><tr><th>Date</th><th>Vehicle</th><th>Type</th><th>Qty</th><th>Price</th><th>Total</th><th>Odometer</th><th></th></tr></thead><tbody></tbody></table>
+<script>
+const FUEL_TYPES = ['diesel', 'petrol', 'electric', 'cng', 'lpg'];
+const $ = (s) => document.querySelector(s);
+const form = $('#form');
+form.fuelType.innerHTML = FUEL_TYPES.map((t) => `<option>${t}</option>`).join('');
+const cell = (text) => { const td = document.createElement('td'); td.textContent = text ?? '—'; return td; };
+const row = (vals) => { const tr = document.createElement('tr'); vals.forEach((v) => tr.append(cell(v))); return tr; };
+
+async function load() {
+  const q = $('#filter').value.trim() ? `?vehicleId=${encodeURIComponent($('#filter').value.trim())}` : '';
+  const [entries, summary] = await Promise.all([
+    fetch('/api/fuel' + q).then((r) => r.json()),
+    fetch('/api/fuel/summary' + q).then((r) => r.json()),
+  ]);
+  $('#summary tbody').replaceChildren(...summary.vehicles.map((v) =>
+    row([v.vehicleId, v.fillUps, v.totalQuantity, v.totalCost, v.averageUnitPrice, v.consumptionPer100km, v.costPerKm])));
+  $('#log tbody').replaceChildren(...entries.map((e) => {
+    const tr = row([e.date.slice(0, 10), e.vehicleId, e.fuelType, e.quantity, e.unitPrice, e.totalCost, e.odometer]);
+    const td = document.createElement('td');
+    const b = document.createElement('button'); b.textContent = 'Delete';
+    b.onclick = async () => { await fetch('/api/fuel/' + e.id, { method: 'DELETE' }); load(); };
+    td.append(b); tr.append(td); return tr;
+  }));
+}
+form.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  document.querySelectorAll('.error').forEach((s) => (s.textContent = ''));
+  const body = Object.fromEntries(new FormData(form));
+  body.fullTank = form.fullTank.checked;
+  const res = await fetch('/api/fuel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  if (res.ok) { form.reset(); load(); return; }
+  const { details = {}, error } = await res.json();
+  for (const [k, m] of Object.entries(details)) { const s = document.querySelector(`[data-for="${k}"]`); if (s) s.textContent = m; }
+  if (!Object.keys(details).length) alert(error);
+});
+$('#filter').addEventListener('input', load);
+load();
+</script>
+</body>
+</html>
