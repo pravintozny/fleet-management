@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Fleet Management</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#f5f6f8;color:#222}
+nav{background:#1f3a5f;padding:12px}nav button{background:none;border:0;color:#fff;font-size:16px;padding:6px 14px;cursor:pointer}
+nav button.active{background:#35588a;border-radius:4px}
+main{max-width:960px;margin:20px auto;padding:0 16px}section{display:none}section.active{display:block}
+form{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}input{padding:6px}
+table{width:100%;border-collapse:collapse;background:#fff}th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}
+#err{color:#b00020}
+</style></head><body>
+<nav><button data-t="trips" class="active">Trip Management</button><button data-t="fuel">Fuel Management</button></nav>
+<main><p id="err"></p>
+<section id="trips" class="active"><h2>Trips</h2>
+<form id="tf"><input name="vehicleId" placeholder="Vehicle" required><input name="driver" placeholder="Driver" required>
+<input name="origin" placeholder="Origin" required><input name="destination" placeholder="Destination" required><button>Create trip</button></form>
+<table><thead><tr><th>ID</th><th>Vehicle</th><th>Driver</th><th>Route</th><th>Status</th><th>km</th><th></th></tr></thead><tbody id="tb"></tbody></table></section>
+<section id="fuel"><h2>Fuel</h2>
+<form id="ff"><input name="vehicleId" placeholder="Vehicle" required><input name="tripId" placeholder="Trip ID (optional)">
+<input name="liters" type="number" step="any" placeholder="Liters" required><input name="pricePerLiter" type="number" step="any" placeholder="Price/L" required>
+<input name="odometer" type="number" step="any" placeholder="Odometer" required><button>Add fill-up</button></form>
+<table><thead><tr><th>ID</th><th>Vehicle</th><th>Liters</th><th>Total</th><th>Odometer</th><th></th></tr></thead><tbody id="fb"></tbody></table>
+<h3>Efficiency summary</h3><table><thead><tr><th>Vehicle</th><th>Liters</th><th>Cost</th><th>km/L</th></tr></thead><tbody id="sb"></tbody></table></section></main>
+<script>
+const $=s=>document.querySelector(s),err=$('#err');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+async function api(p,m='GET',b){const r=await fetch('/api/'+p,{method:m,headers:{'content-type':'application/json'},body:b?JSON.stringify(b):undefined});
+ const j=r.status===204?null:await r.json();if(!r.ok)throw new Error(j.error);return j}
+const guard=f=>async(...a)=>{try{err.textContent='';await f(...a)}catch(e){err.textContent=e.message}};
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button,section').forEach(e=>e.classList.remove('active'));
+ b.classList.add('active');$('#'+b.dataset.t).classList.add('active')});
+const NEXT={planned:['in_progress','cancelled'],in_progress:['completed','cancelled']};
+async function load(){
+ const trips=await api('trips');
+ $('#tb').innerHTML=trips.map(t=>`<tr><td>${esc(t.id)}</td><td>${esc(t.vehicleId)}</td><td>${esc(t.driver)}</td><td>${esc(t.origin)} → ${esc(t.destination)}</td><td>${esc(t.status)}</td><td>${esc(t.distanceKm)}</td>
+ <td>${(NEXT[t.status]||[]).map(s=>`<button data-id="${esc(t.id)}" data-s="${s}">${s}</button>`).join(' ')}</td></tr>`).join('');
+ const logs=await api('fuel');
+ $('#fb').innerHTML=logs.map(l=>`<tr><td>${esc(l.id)}</td><td>${esc(l.vehicleId)}</td><td>${esc(l.liters)}</td><td>${esc(l.totalCost)}</td><td>${esc(l.odometer)}</td><td><button data-del="${esc(l.id)}">delete</button></td></tr>`).join('');
+ const vs=[...new Set(logs.map(l=>l.vehicleId))],sm=await Promise.all(vs.map(v=>api('fuel/summary?vehicleId='+encodeURIComponent(v))));
+ $('#sb').innerHTML=sm.map(s=>`<tr><td>${esc(s.vehicleId)}</td><td>${esc(s.totalLiters)}</td><td>${esc(s.totalCost)}</td><td>${esc(s.kmPerLiter??'n/a')}</td></tr>`).join('')}
+$('#tf').onsubmit=guard(async e=>{e.preventDefault();await api('trips','POST',Object.fromEntries(new FormData(e.target)));e.target.reset();await load()});
+$('#ff').onsubmit=guard(async e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));
+ for(const k of['liters','pricePerLiter','odometer'])d[k]=Number(d[k]);if(!d.tripId)delete d.tripId;await api('fuel','POST',d);e.target.reset();await load()});
+$('#tb').onclick=guard(async e=>{const b=e.target.dataset;if(!b.s)return;let odometer;
+ if(b.s!=='cancelled'){odometer=Number(prompt('Odometer reading?'));}await api(`trips/${b.id}/status`,'POST',{status:b.s,odometer});await load()});
+$('#fb').onclick=guard(async e=>{if(e.target.dataset.del){await api('fuel/'+e.target.dataset.del,'DELETE');await load()}});
+guard(load)();
+</script></body></html>
